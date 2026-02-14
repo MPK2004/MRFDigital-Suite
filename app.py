@@ -127,7 +127,7 @@ elif page == "Data Management":
     with tab1:
         st.write("Upload CSV files containing waste records.")
         uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
-        
+        append_mode = st.checkbox("Append to existing data (do not overwrite)")
         if uploaded_file is not None:
             # Save temporarily
             temp_path = os.path.join("uploads", "temp_import.csv")
@@ -139,8 +139,8 @@ elif page == "Data Management":
             if st.button("Process Import"):
                 with st.spinner("Importing data..."):
                     try:
-                        import_csv_data(DB_PATH, temp_path)
-                        st.success("Data imported successfully!")
+                        summary = import_csv_data(DB_PATH, temp_path, append=append_mode)
+                        st.success(f"Success {summary}")
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:

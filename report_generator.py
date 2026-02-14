@@ -25,13 +25,26 @@ def init_db(db_path):
     conn.commit()
     conn.close()
 
-def import_csv_data(db_path, csv_path):
+def import_csv_data(db_path, csv_path, append=False):
     """
     Imports data from a CSV file into the database.
-    Includes robust column mapping to handle different header names.
+    
+    Features:
+    - append: If True, adds to existing data. If False, replaces it.
+    - Validation: Skips rows with missing essential data or invalid weights.
+    - Duplicates: Checks if a record already exists before inserting.
     """
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
+    
+    if not append:
+        c.execute("DELETE FROM waste_records")
+        print("Existing data cleared.")
+    else:
+        print("Append mode enabled. Existing data preserved.")
+    
+    rows_inserted = 0
+    rows_skipped = 0
     
     with open(csv_path, 'r') as f:
         reader = csv.DictReader(f)
@@ -39,33 +52,49 @@ def import_csv_data(db_path, csv_path):
         
         for row in reader:
             date_val = row.get('date', row.get('Date'))
-            
             vehicle = row.get('vehicle_id', row.get('vehicle_no', row.get('Vehicle No')))
-            
-            weight_val = row.get('weight', row.get('weight_kg', row.get('Weight')))
-            
+            weight_str = row.get('weight', row.get('weight_kg', row.get('Weight')))
             material_val = row.get('material', row.get('waste_type', row.get('Waste Type')))
-            
             dest_val = row.get('destination', row.get('source_panchayat', row.get('Source')))
 
-            if date_val and weight_val:
-                try:
-                    c.execute(
-                        "INSERT INTO waste_records (date, vehicle_id, weight, material, destination) VALUES (?, ?, ?, ?, ?)",
-                        (
-                            date_val, 
-                            vehicle, 
-                            float(weight_val), 
-                            material_val, 
-                            dest_val
-                        )
-                    )
-                except ValueError:
-                    print(f"Skipping row due to invalid data: {row}")
+            if not date_val or not weight_str:
+                print(f"Skipping invalid row (missing date or weight): {row}")
+                rows_skipped += 1
+                continue
+            
+            try:
+                weight_val = float(weight_str)
+            except ValueError:
+                print(f"Skipping row (invalid weight format): {weight_str}")
+                rows_skipped += 1
+                continue
+
+            check_sql = """
+                SELECT id FROM waste_records 
+                WHERE date=? AND vehicle_id=? AND weight=? AND material=? AND destination=?
+            """
+            c.execute(check_sql, (date_val, vehicle, weight_val, material_val, dest_val))
+            if c.fetchone():
+                print(f"Skipping duplicate record: {date_val} - {vehicle}")
+                rows_skipped += 1
+                continue
+
+            try:
+                c.execute(
+                    "INSERT INTO waste_records (date, vehicle_id, weight, material, destination) VALUES (?, ?, ?, ?, ?)",
+                    (date_val, vehicle, weight_val, material_val, dest_val)
+                )
+                rows_inserted += 1
+            except Exception as e:
+                print(f"Database error on row {row}: {e}")
+                rows_skipped += 1
     
     conn.commit()
     conn.close()
-    print(f"Imported data from {csv_path}")
+    
+    summary = f"Import Complete: {rows_inserted} inserted, {rows_skipped} skipped."
+    print(summary)
+    return summary
 
 def load_sample_data(db_path):
     """
@@ -77,13 +106,11 @@ def load_sample_data(db_path):
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
     
-    # Clear existing data to avoid duplicates when loading sample data
     c.execute("DELETE FROM waste_records")
     
-    # Generate data for last 30 days
     start_date = datetime.now() - timedelta(days=30)
     
-    for i in range(100):  # 100 sample records
+    for i in range(100):
         days_offset = random.randint(0, 29)
         record_date = (start_date + timedelta(days=days_offset)).strftime("%Y-%m-%d")
         
